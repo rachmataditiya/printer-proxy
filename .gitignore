@@ -1,1 +1,24 @@
+# Build artifacts
 /target
+target/
+
+# Dependency lock file (optional for applications)
+Cargo.lock
+
+# Log files
+logs/
+*.log
+
+# Deployment artifacts
+deploy/
+printer-proxy-*
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
