@@ -61,26 +61,33 @@ pub async fn handle_print(
     ensure_printer_online(printer).await?;
     info!("✅ Printer '{}' is online and ready", printer_id);
 
-    // Override opsional (query/header)
+    // Override opsional (query/header) - optimized parsing
     let invert_override = query.get("invert")
-        .and_then(|v| Some(parse_bool_public(v)))
-        .or_else(|| headers.get("x-escpos-invert").and_then(|h| h.to_str().ok()).map(parse_bool_public));
+        .map(|v| parse_bool_public(v))
+        .or_else(|| {
+            headers.get("x-escpos-invert")
+                .and_then(|h| h.to_str().ok())
+                .map(parse_bool_public)
+        });
 
     let bit_override = query.get("bit")
         .map(|v| parse_bit_order_public(v))
-        .or_else(|| headers.get("x-escpos-bit-order").and_then(|h| h.to_str().ok()).map(parse_bit_order_public));
+        .or_else(|| {
+            headers.get("x-escpos-bit-order")
+                .and_then(|h| h.to_str().ok())
+                .map(parse_bit_order_public)
+        });
 
-    // Content-Type
+    // Content-Type - avoid unnecessary allocations
     let ct = headers
         .get(CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_ascii_lowercase();
+        .unwrap_or("");
     
     debug!("📄 Content-Type: {}", ct);
     debug!("📊 Body size: {} bytes", body.len());
 
-    // Mode A: ePOS SOAP
+    // Mode A: ePOS SOAP - optimized content-type checking
     if ct.starts_with("text/plain")
         || ct.starts_with("text/xml")
         || ct.starts_with("application/xml")
@@ -173,14 +180,14 @@ pub async fn printers_health_check(State(state): State<AppState>) -> impl IntoRe
     let mut results = HashMap::new();
     let mut futures = Vec::new();
     
-    // Create futures for all printer health checks
+    // Create futures for all printer health checks (reduce cloning)
     for (id, printer) in state.printers.iter() {
-        let printer_clone = printer.clone();
-        let id_clone = id.clone();
+        let printer_ref = printer.clone(); // Only clone once
+        let id_ref = id.clone();
         
         futures.push(async move {
-            let status = check_printer_health(&printer_clone).await;
-            (id_clone, status)
+            let status = check_printer_health(&printer_ref).await;
+            (id_ref, status)
         });
     }
     

@@ -4,6 +4,7 @@ mod errors;
 mod escpos;
 mod handlers;
 mod health;
+mod pool;
 
 use axum::{
     routing::{any, get},
@@ -116,6 +117,12 @@ async fn main() -> anyhow::Result<()> {
         .expect("Failed to bind to address");
     
     info!("✅ Server siap menerima koneksi di {}", addr);
+    
+    // Start background cleanup task
+    tokio::spawn(async {
+        pool::start_cleanup_task().await;
+    });
+    info!("🧹 Background cleanup task started");
     
     if let Err(e) = serve(listener, app.into_make_service())
         .with_graceful_shutdown(shutdown_signal())

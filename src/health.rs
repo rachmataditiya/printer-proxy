@@ -21,17 +21,14 @@ impl std::fmt::Display for PrinterStatus {
     }
 }
 
-/// Check if a printer is reachable
+/// Check if a printer is reachable (with caching)
 #[instrument(skip(printer), fields(printer_id = %printer.id))]
 pub async fn check_printer_health(printer: &Printer) -> PrinterStatus {
-    match &printer.backend {
-        Backend::Tcp9100 { host, port } => {
-            check_tcp_health(host, *port).await
-        }
-    }
+    crate::pool::HEALTH_CACHE.get_or_check(printer).await
 }
 
 /// Check TCP connectivity to printer
+#[allow(dead_code)]
 #[instrument]
 async fn check_tcp_health(host: &str, port: u16) -> PrinterStatus {
     let addr = format!("{}:{}", host, port);

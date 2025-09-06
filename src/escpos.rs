@@ -254,9 +254,12 @@ pub fn parse_epos_soap(
                         ));
                     }
 
-                    let cleaned: String =
-                        current_b64.chars().filter(|c| !c.is_whitespace()).collect();
-                    let mut bitmap = BASE64_STANDARD.decode(cleaned.trim()).map_err(|e| {
+                    let cleaned: String = current_b64.chars().filter(|c| !c.is_whitespace()).collect();
+                    
+                    // Pre-allocate with estimated decoded size to avoid reallocations
+                    let estimated_decoded_size = (cleaned.len() * 3) / 4; // Base64 decode ratio
+                    let mut bitmap = Vec::with_capacity(estimated_decoded_size);
+                    BASE64_STANDARD.decode_vec(cleaned.trim(), &mut bitmap).map_err(|e| {
                         ProxyError::BadPayload(format!("Base64 <image> invalid: {e}"))
                     })?;
 
@@ -305,7 +308,10 @@ pub fn parse_epos_soap(
 
 /// Bangun ESC/POS dari EposDoc
 pub fn build_escpos_from_epos_doc(doc: &EposDoc) -> Result<Vec<u8>, ProxyError> {
-    let mut out = Vec::with_capacity(1024 + doc.images.iter().map(|i| i.bitmap.len()).sum::<usize>());
+    // Pre-calculate total capacity needed for better memory allocation
+    let total_bitmap_size: usize = doc.images.iter().map(|i| i.bitmap.len()).sum();
+    let estimated_commands_size = doc.images.len() * 50; // ~50 bytes per image command overhead
+    let mut out = Vec::with_capacity(1024 + total_bitmap_size + estimated_commands_size);
     esc_init(&mut out);
 
     for img in &doc.images {
@@ -333,7 +339,15 @@ pub fn build_escpos_from_epos_doc(doc: &EposDoc) -> Result<Vec<u8>, ProxyError> 
 }
 
 pub fn build_escpos_from_ops(ops: &[PrintOp]) -> Result<Vec<u8>, ProxyError> {
-    let mut out = Vec::with_capacity(1024);
+    // Better capacity estimation based on operation types
+    let estimated_size = ops.iter().map(|op| match op {
+        PrintOp::Init => 2,
+        PrintOp::Text { data, .. } => data.len() + 1,
+        PrintOp::Feed { .. } => 3,
+        PrintOp::Cut { .. } => 3,
+    }).sum::<usize>();
+    let mut out = Vec::with_capacity(estimated_size.max(256));
+    
     for op in ops {
         match op {
             PrintOp::Init => esc_init(&mut out),
