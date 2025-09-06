@@ -40,12 +40,12 @@ fi
 
 # Create Dockerfile for cross-compilation
 cat > Dockerfile.build << EOF
-FROM --platform=$DOCKER_PLATFORM rust:1.75-alpine
+FROM --platform=$DOCKER_PLATFORM rust:1.82-alpine
 
 RUN apk add --no-cache musl-dev
 
 WORKDIR /app
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.toml ./
 COPY src ./src
 
 RUN rustup target add $RUST_TARGET
