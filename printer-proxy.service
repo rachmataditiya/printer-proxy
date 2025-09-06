@@ -1,0 +1,46 @@
+[Unit]
+Description=Printer Proxy Server (ESC/POS)
+Documentation=https://github.com/user/printer-proxy
+After=network.target
+Wants=network.target
+
+[Service]
+Type=exec
+User=printer-proxy
+Group=printer-proxy
+ExecStart=/usr/local/bin/printer-proxy
+ExecReload=/bin/kill -HUP $MAINPID
+KillMode=mixed
+KillSignal=SIGTERM
+RestartSec=5
+Restart=on-failure
+
+# Environment variables
+Environment=RUST_LOG=info
+Environment=LISTEN_ADDR=0.0.0.0:8080
+Environment=PRINTERS_CONFIG=/etc/printer-proxy/printers.yaml
+
+# Working directory and file permissions
+WorkingDirectory=/var/lib/printer-proxy
+ExecStartPre=/bin/mkdir -p /var/lib/printer-proxy/logs
+ExecStartPre=/bin/chown -R printer-proxy:printer-proxy /var/lib/printer-proxy
+
+# Security settings
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/printer-proxy
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+# Limits
+LimitNOFILE=65536
+TasksMax=4096
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=printer-proxy
+
+[Install]
+WantedBy=multi-user.target

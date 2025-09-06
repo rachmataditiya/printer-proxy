@@ -1,0 +1,16 @@
+# Definisi beberapa printer
+printers:
+  - name: "Kasir-1"
+    id: "printer_kasir_1"
+    backend:
+      type: "tcp9100"
+      host: "192.168.10.21"
+      port: 9100
+
+  - name: "Kasir-2"
+    id: "printer_kasir_2"
+    backend:
+      type: "tcp9100"
+      host: "192.168.10.22"
+      port: 9100
+
