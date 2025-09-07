@@ -1,6 +1,6 @@
 [Unit]
-Description=Printer Proxy Server (ESC/POS)
-Documentation=https://github.com/user/printer-proxy
+Description=Printer Proxy Server (ESC/POS) - High Performance Rust Implementation
+Documentation=https://github.com/rachmataditiya/printer-proxy
 After=network.target
 Wants=network.target
 
@@ -12,6 +12,7 @@ ExecStart=/usr/local/bin/printer-proxy
 ExecReload=/bin/kill -HUP $MAINPID
 KillMode=mixed
 KillSignal=SIGTERM
+TimeoutStopSec=30
 RestartSec=5
 Restart=on-failure
 
@@ -19,23 +20,27 @@ Restart=on-failure
 Environment=RUST_LOG=info
 Environment=LISTEN_ADDR=0.0.0.0:8080
 Environment=PRINTERS_CONFIG=/etc/printer-proxy/printers.yaml
+# Admin token for management endpoints (CHANGE THIS!)
+Environment=ADMIN_TOKEN=change-this-to-secure-token-32chars-minimum
 
 # Working directory and file permissions
 WorkingDirectory=/var/lib/printer-proxy
 ExecStartPre=/bin/mkdir -p /var/lib/printer-proxy/logs
 ExecStartPre=/bin/chown -R printer-proxy:printer-proxy /var/lib/printer-proxy
+ExecStartPre=/bin/chown -R printer-proxy:printer-proxy /etc/printer-proxy
 
 # Security settings
 PrivateDevices=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths=/var/lib/printer-proxy
+ReadWritePaths=/var/lib/printer-proxy /etc/printer-proxy
 NoNewPrivileges=yes
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 
 # Limits
 LimitNOFILE=65536
 TasksMax=4096
+MemoryMax=512M
 
 # Logging
 StandardOutput=journal

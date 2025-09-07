@@ -1,440 +1,473 @@
-# 🚀 Deployment Guide
+# 🚀 Raspberry Pi Deployment Guide
 
 ## Overview
 
-Guide untuk deploy Printer Proxy ke Raspberry Pi atau Linux server dengan systemd service.
+Complete deployment guide for printer-proxy on Raspberry Pi with all latest features including high-performance connection pooling, admin management endpoints, printer CRUD API, and SSL certificate management.
 
 ## 📋 Prerequisites
 
-### Development Machine (Mac)
-- Rust toolchain installed
-- Docker Desktop (untuk cross-compilation)
-- SSH access ke target device
+### System Requirements
+- **Raspberry Pi OS** (or compatible Linux distribution)
+- **Rust/Cargo** installed
+- **Root privileges** (sudo access)
+- **Internet connection** for dependencies
+- **Minimum 1GB RAM** (2GB+ recommended)
+- **Minimum 2GB free disk space**
 
-### Target Device (Raspberry Pi/Linux)
-- Raspbian OS atau Linux distro dengan systemd
-- SSH server enabled
-- sudo privileges
-
-## 🎯 Supported Architectures
-
-| Device | Architecture | Rust Target |
-|--------|-------------|-------------|
-| Raspberry Pi 4+ (64-bit) | `aarch64` | `aarch64-unknown-linux-musl` |
-| Raspberry Pi 3 and older | `armv7` | `armv7-unknown-linux-musleabihf` |
-| x86_64 Linux | `x86_64` | `x86_64-unknown-linux-musl` |
-
-## 🛠️ Cross-Compilation Options
-
-### Option 1: Docker Cross-Compilation (Recommended)
-
+### Install Rust (if not already installed)
 ```bash
-# Build for ARM64 (Pi 4+)
-./build-docker.sh aarch64
-
-# Build for ARMv7 (Pi 3 and older)
-./build-docker.sh armv7
-```
-
-### Option 2: Native Cross-Compilation
-
-Requires cross-compilation toolchain:
-
-```bash
-# Install target
-rustup target add aarch64-unknown-linux-musl
-
-# Install zig (as linker)
-brew install zig
-
-# Set environment
-export CC_aarch64_unknown_linux_musl="zig cc -target aarch64-linux-musl"
-
-# Build
-cargo build --target aarch64-unknown-linux-musl --release
-```
-
-### Option 3: Build on Target Device
-
-```bash
-# Copy source to target
-scp -r . pi@192.168.1.100:~/printer-proxy/
-
-# SSH and build natively
-ssh pi@192.168.1.100
-cd ~/printer-proxy
+# Install Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source ~/.cargo/env
+
+# Verify installation
+cargo --version
+rustc --version
+```
+
+## 🚀 Quick Deployment
+
+### Option 1: Complete Automated Deployment
+```bash
+# Clone repository
+git clone https://github.com/rachmataditiya/printer-proxy.git
+cd printer-proxy
+
+# Run complete deployment
+sudo ./deploy-raspberry-pi.sh
+```
+
+### Option 2: Step-by-Step Deployment
+```bash
+# 1. Build the application
 cargo build --release
+
+# 2. Install service
+sudo ./install.sh
+
+# 3. Setup SSL certificates
+sudo ./setup-ssl.sh your-domain.local
+
+# 4. Generate admin token
+sudo ./generate-token.sh --update-service
 ```
 
-## 📦 Deployment Process
+## 📜 Deployment Scripts
 
-### Automated Deployment
+### 1. `deploy-raspberry-pi.sh` - Complete Deployment
+**Purpose**: One-command complete deployment with all features.
 
+**Usage**:
 ```bash
-# Deploy to Raspberry Pi
-./deploy.sh pi@192.168.1.100 aarch64
+# Full deployment for localhost
+sudo ./deploy-raspberry-pi.sh
 
-# Deploy to custom host
-./deploy.sh user@hostname armv7
+# Full deployment for custom domain
+sudo ./deploy-raspberry-pi.sh printer.local
+
+# Deploy without SSL
+sudo ./deploy-raspberry-pi.sh --skip-ssl printer.local
+
+# Use custom admin token
+sudo ./deploy-raspberry-pi.sh --admin-token my-secure-token-32chars
 ```
 
-### Manual Deployment
+**Features**:
+- ✅ System requirements check
+- ✅ Application build
+- ✅ Service installation
+- ✅ SSL certificate setup
+- ✅ Nginx reverse proxy configuration
+- ✅ Admin token generation
+- ✅ Installation testing
 
-1. **Build binary** (choose one method above)
+### 2. `install.sh` - Service Installation
+**Purpose**: Install printer-proxy as systemd service.
 
-2. **Create deployment package:**
-   ```bash
-   mkdir deploy
-   cp target/aarch64-unknown-linux-musl/release/printer-proxy deploy/
-   cp printer-proxy.service deploy/
-   cp printers.yaml deploy/
-   ```
-
-3. **Copy to target:**
-   ```bash
-   scp -r deploy/ pi@192.168.1.100:~/printer-proxy-deploy/
-   ```
-
-4. **Install on target:**
-   ```bash
-   ssh pi@192.168.1.100
-   cd ~/printer-proxy-deploy
-   sudo ./install.sh
-   ```
-
-## 🔧 Manual Installation Steps
-
-### 1. Create User and Directories
-
+**Usage**:
 ```bash
-# Create system user
-sudo useradd --system --shell /usr/sbin/nologin --home-dir /var/lib/printer-proxy printer-proxy
+# Install with auto-generated token
+sudo ./install.sh
 
-# Create directories
-sudo mkdir -p /usr/local/bin
-sudo mkdir -p /etc/printer-proxy
-sudo mkdir -p /var/lib/printer-proxy/logs
-sudo mkdir -p /var/log/printer-proxy
+# Install with custom token
+sudo ./install.sh --admin-token my-secure-token
+
+# Install with custom configuration
+sudo ./install.sh --listen-addr 127.0.0.1:8080 --log-level debug
 ```
 
-### 2. Install Binary
+**What it does**:
+- Creates `printer-proxy` system user
+- Installs binary to `/usr/local/bin/`
+- Creates configuration directories
+- Sets up systemd service
+- Generates default `printers.yaml`
+- Starts and enables service
 
+### 3. `setup-ssl.sh` - SSL Certificate Setup
+**Purpose**: Setup SSL certificates and nginx reverse proxy.
+
+**Usage**:
 ```bash
-# Copy binary
-sudo cp printer-proxy /usr/local/bin/
-sudo chmod +x /usr/local/bin/printer-proxy
-sudo chown root:root /usr/local/bin/printer-proxy
+# Setup for localhost
+sudo ./setup-ssl.sh
+
+# Setup for custom domain
+sudo ./setup-ssl.sh printer.local
+
+# Setup for custom domain and port
+sudo ./setup-ssl.sh printer.local 8080
 ```
 
-### 3. Install Configuration
+**Features**:
+- Self-signed certificate generation
+- Nginx reverse proxy configuration
+- HTTP to HTTPS redirect
+- Security headers
+- Admin/API endpoint restrictions
+- WebSocket support
 
+### 4. `generate-token.sh` - Admin Token Generator
+**Purpose**: Generate secure admin tokens for API access.
+
+**Usage**:
 ```bash
-# Copy config
-sudo cp printers.yaml /etc/printer-proxy/
-sudo chown root:printer-proxy /etc/printer-proxy/printers.yaml
-sudo chmod 640 /etc/printer-proxy/printers.yaml
+# Generate 32-character token
+sudo ./generate-token.sh
+
+# Generate custom length token
+sudo ./generate-token.sh --length 48
+
+# Generate and update service file
+sudo ./generate-token.sh --update-service
 ```
 
-### 4. Set Permissions
+### 5. `uninstall.sh` - Service Removal
+**Purpose**: Completely remove printer-proxy installation.
 
+**Usage**:
 ```bash
-sudo chown -R printer-proxy:printer-proxy /var/lib/printer-proxy
-sudo chown -R printer-proxy:printer-proxy /var/log/printer-proxy
+# Interactive uninstallation
+sudo ./uninstall.sh
+
+# Force uninstallation
+sudo ./uninstall.sh --force
 ```
 
-### 5. Install Systemd Service
+## 🔧 Configuration
 
-```bash
-# Install service file
-sudo cp printer-proxy.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable printer-proxy
-```
+### Service Configuration
+The service is configured via systemd environment variables in `/etc/systemd/system/printer-proxy.service`:
 
-## ⚙️ Configuration
-
-### Edit Printer Configuration
-
-```bash
-sudo nano /etc/printer-proxy/printers.yaml
-```
-
-Example configuration:
-```yaml
-printers:
-  - name: "Printer Kasir 1"
-    id: "kasir_1"
-    backend:
-      type: "tcp9100"
-      host: "192.168.1.201"
-      port: 9100
-      
-  - name: "Printer Dapur"
-    id: "dapur"
-    backend:
-      type: "tcp9100"
-      host: "192.168.1.202"
-      port: 9100
-```
-
-### Environment Variables
-
-Edit service file if needed:
-```bash
-sudo systemctl edit printer-proxy
-```
-
-Override configuration:
 ```ini
 [Service]
-Environment=RUST_LOG=debug
-Environment=LISTEN_ADDR=0.0.0.0:3000
-Environment=PRINTERS_CONFIG=/etc/printer-proxy/custom-printers.yaml
+Environment=RUST_LOG=info
+Environment=LISTEN_ADDR=0.0.0.0:8080
+Environment=PRINTERS_CONFIG=/etc/printer-proxy/printers.yaml
+Environment=ADMIN_TOKEN=your-secure-token-here
 ```
 
-## 🎮 Service Management
+### Printer Configuration
+Configure printers in `/etc/printer-proxy/printers.yaml`:
 
-### Start Service
-
-```bash
-sudo systemctl start printer-proxy
+```yaml
+printers:
+  - name: "Office Printer"
+    id: "office-001"
+    backend:
+      type: "tcp9100"
+      host: "192.168.1.100"
+      port: 9100
+  
+  - name: "Kitchen Printer"
+    id: "kitchen-001"
+    backend:
+      type: "tcp9100"
+      host: "192.168.1.101"
+      port: 9100
 ```
 
-### Stop Service
+### Nginx Configuration
+SSL and reverse proxy configuration in `/etc/nginx/sites-available/your-domain.conf`:
 
+- HTTP to HTTPS redirect
+- SSL certificate configuration
+- Security headers
+- Admin/API endpoint restrictions
+- WebSocket support
+
+## 🌐 Access URLs
+
+### HTTP Endpoints (Direct Access)
+- **Health Check**: `http://localhost:8080/healthz`
+- **Printers Health**: `http://localhost:8080/health/printers`
+- **Print Endpoint**: `http://localhost:8080/{printer_id}/cgi-bin/epos/service.cgi`
+
+### HTTPS Endpoints (via Nginx)
+- **Main Site**: `https://your-domain.local`
+- **Health Check**: `https://your-domain.local/healthz`
+- **Print Endpoint**: `https://your-domain.local/{printer_id}/cgi-bin/epos/service.cgi`
+
+### Admin Endpoints (Token Required)
+- **Service Status**: `GET /admin/status?token=TOKEN`
+- **Service Shutdown**: `GET /admin/shutdown?token=TOKEN`
+- **Service Restart**: `GET /admin/restart?token=TOKEN`
+- **SSL Renewal**: `GET /admin/ssl/renew?token=TOKEN`
+
+### Printer Management API (Token Required)
+- **List Printers**: `GET /api/printers?token=TOKEN`
+- **Create Printer**: `POST /api/printers?token=TOKEN`
+- **Update Printer**: `PUT /api/printers/{id}?token=TOKEN`
+- **Delete Printer**: `DELETE /api/printers/{id}?token=TOKEN`
+- **Reload Config**: `GET /api/printers/reload?token=TOKEN`
+
+## 🔒 Security Configuration
+
+### Admin Token Security
 ```bash
-sudo systemctl stop printer-proxy
-```
+# Generate secure token
+sudo ./generate-token.sh --length 64
 
-### Restart Service
+# Update service with new token
+sudo ./generate-token.sh --update-service
 
-```bash
+# Restart service to apply changes
 sudo systemctl restart printer-proxy
 ```
 
-### Check Status
+### Network Security
+- Admin/API endpoints restricted to local networks
+- SSL/TLS encryption for all HTTPS traffic
+- Security headers (HSTS, X-Frame-Options, etc.)
+- Firewall rules recommended
 
+### File Permissions
 ```bash
-sudo systemctl status printer-proxy
+# Check service file permissions
+ls -la /etc/systemd/system/printer-proxy.service
+
+# Check config directory permissions
+ls -la /etc/printer-proxy/
+
+# Check data directory permissions
+ls -la /var/lib/printer-proxy/
 ```
 
-### Enable Auto-start
+## 🛠️ Service Management
 
-```bash
-sudo systemctl enable printer-proxy
-```
-
-### Disable Auto-start
-
-```bash
-sudo systemctl disable printer-proxy
-```
-
-## 📊 Monitoring and Logs
-
-### View Logs
-
-```bash
-# Follow logs real-time
-sudo journalctl -u printer-proxy -f
-
-# View recent logs
-sudo journalctl -u printer-proxy -n 100
-
-# View logs with timestamps
-sudo journalctl -u printer-proxy --since "1 hour ago"
-```
-
-### Log Files
-
-- **Service logs**: `journalctl -u printer-proxy`
-- **Application logs**: `/var/lib/printer-proxy/logs/printer-proxy.log.YYYY-MM-DD`
-
-### Health Check
-
-```bash
-# Application health
-curl http://localhost:8080/healthz
-
-# All printers health
-curl -s http://localhost:8080/health/printers | jq .
-
-# Specific printer health
-curl -s http://localhost:8080/health/printer/kasir_1 | jq .
-```
-
-## 🔒 Security Considerations
-
-### Firewall Configuration
-
-```bash
-# Allow printer proxy port
-sudo ufw allow 8080/tcp
-
-# Restrict to specific network
-sudo ufw allow from 192.168.1.0/24 to any port 8080
-```
-
-### Service Security Features
-
-- Runs as dedicated `printer-proxy` user
-- No shell access (`/usr/sbin/nologin`)
-- Limited capabilities (`CAP_NET_BIND_SERVICE` only)
-- Protected directories (`ProtectSystem=strict`)
-- Private devices (`PrivateDevices=yes`)
-
-## 🚨 Troubleshooting
-
-### Service Won't Start
-
+### Basic Commands
 ```bash
 # Check service status
 sudo systemctl status printer-proxy
 
-# Check configuration
-sudo /usr/local/bin/printer-proxy --help
+# Start service
+sudo systemctl start printer-proxy
 
-# Test configuration
-sudo -u printer-proxy /usr/local/bin/printer-proxy
-```
-
-### Permission Issues
-
-```bash
-# Fix permissions
-sudo chown -R printer-proxy:printer-proxy /var/lib/printer-proxy
-sudo chmod 640 /etc/printer-proxy/printers.yaml
-```
-
-### Network Issues
-
-```bash
-# Test printer connectivity
-telnet 192.168.1.201 9100
-
-# Check listening ports
-sudo netstat -tlnp | grep printer-proxy
-```
-
-### Log Issues
-
-```bash
-# Check log directory permissions
-ls -la /var/lib/printer-proxy/logs/
-
-# Check systemd journal
-sudo journalctl -u printer-proxy --no-pager
-```
-
-## 🗑️ Uninstallation
-
-Run the uninstall script:
-
-```bash
-sudo ./uninstall.sh
-```
-
-Or manually:
-
-```bash
-# Stop and disable service
-sudo systemctl stop printer-proxy
-sudo systemctl disable printer-proxy
-
-# Remove files
-sudo rm -f /usr/local/bin/printer-proxy
-sudo rm -f /etc/systemd/system/printer-proxy.service
-sudo rm -rf /etc/printer-proxy
-sudo rm -rf /var/lib/printer-proxy
-sudo rm -rf /var/log/printer-proxy
-
-# Remove user
-sudo userdel printer-proxy
-
-# Reload systemd
-sudo systemctl daemon-reload
-```
-
-## 📈 Performance Tuning
-
-### Service Limits
-
-Edit service file to adjust limits:
-
-```ini
-[Service]
-LimitNOFILE=65536
-TasksMax=4096
-MemoryMax=512M
-CPUQuota=200%
-```
-
-### Logging Performance
-
-For high-volume deployments:
-
-```ini
-[Service]
-Environment=RUST_LOG=warn
-StandardOutput=null
-StandardError=journal
-```
-
-## 🔄 Updates
-
-### Update Binary
-
-```bash
 # Stop service
 sudo systemctl stop printer-proxy
 
-# Replace binary
-sudo cp new-printer-proxy /usr/local/bin/printer-proxy
+# Restart service
+sudo systemctl restart printer-proxy
 
-# Start service
-sudo systemctl start printer-proxy
+# Enable auto-start
+sudo systemctl enable printer-proxy
+
+# Disable auto-start
+sudo systemctl disable printer-proxy
 ```
 
-### Update Configuration
-
+### Log Management
 ```bash
-# Edit config
-sudo nano /etc/printer-proxy/printers.yaml
+# View service logs
+sudo journalctl -u printer-proxy -f
 
-# Reload service
-sudo systemctl reload printer-proxy
+# View recent logs
+sudo journalctl -u printer-proxy --since "1 hour ago"
+
+# View logs with timestamps
+sudo journalctl -u printer-proxy -o short-iso
+
+# Clear old logs
+sudo journalctl --vacuum-time=7d
 ```
 
-## 🌐 Network Configuration
-
-### Reverse Proxy (nginx)
-
-```nginx
-upstream printer_proxy {
-    server 127.0.0.1:8080;
-}
-
-server {
-    listen 80;
-    server_name printer-proxy.local;
-    
-    location / {
-        proxy_pass http://printer_proxy;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-```
-
-### SSL/TLS Setup
-
+### Configuration Reload
 ```bash
-# Generate self-signed certificate
-sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-    -keyout /etc/ssl/private/printer-proxy.key \
-    -out /etc/ssl/certs/printer-proxy.crt
+# Reload systemd configuration
+sudo systemctl daemon-reload
+
+# Reload nginx configuration
+sudo nginx -t && sudo systemctl reload nginx
+
+# Reload printer configuration (via API)
+curl "http://localhost:8080/api/printers/reload?token=YOUR_TOKEN"
 ```
 
-Note: For production, consider using a reverse proxy like nginx for SSL termination.
+## 🔍 Troubleshooting
+
+### Common Issues
+
+#### 1. Service Won't Start
+```bash
+# Check service status
+sudo systemctl status printer-proxy
+
+# Check logs for errors
+sudo journalctl -u printer-proxy --no-pager
+
+# Check binary exists
+ls -la /usr/local/bin/printer-proxy
+
+# Check permissions
+ls -la /etc/printer-proxy/printers.yaml
+```
+
+#### 2. SSL Certificate Issues
+```bash
+# Check certificate validity
+openssl x509 -in /etc/ssl/localcerts/your-domain.crt -text -noout
+
+# Regenerate certificate
+sudo ./setup-ssl.sh your-domain
+
+# Check nginx configuration
+sudo nginx -t
+```
+
+#### 3. Admin Token Issues
+```bash
+# Check token in service file
+grep ADMIN_TOKEN /etc/systemd/system/printer-proxy.service
+
+# Generate new token
+sudo ./generate-token.sh --update-service
+
+# Test token
+curl "http://localhost:8080/admin/status?token=YOUR_TOKEN"
+```
+
+#### 4. Printer Connection Issues
+```bash
+# Test printer connectivity
+telnet 192.168.1.100 9100
+
+# Check printer configuration
+cat /etc/printer-proxy/printers.yaml
+
+# Test printer health
+curl "http://localhost:8080/health/printer/your-printer-id"
+```
+
+### Performance Monitoring
+```bash
+# Check memory usage
+free -h
+
+# Check CPU usage
+top -p $(pgrep printer-proxy)
+
+# Check disk usage
+df -h
+
+# Check network connections
+netstat -tulpn | grep :8080
+```
+
+## 🔄 Updates and Maintenance
+
+### Updating the Application
+```bash
+# Pull latest changes
+git pull origin main
+
+# Rebuild application
+cargo build --release
+
+# Restart service
+sudo systemctl restart printer-proxy
+```
+
+### Backup Configuration
+```bash
+# Backup configuration
+sudo cp /etc/printer-proxy/printers.yaml /backup/printers-$(date +%Y%m%d).yaml
+
+# Backup service configuration
+sudo cp /etc/systemd/system/printer-proxy.service /backup/service-$(date +%Y%m%d).service
+```
+
+### Certificate Renewal
+```bash
+# Manual renewal
+sudo ./setup-ssl.sh your-domain
+
+# Via admin API
+curl "http://localhost:8080/admin/ssl/renew?token=YOUR_TOKEN&domain=your-domain"
+```
+
+## 📊 Monitoring and Alerts
+
+### Health Check Monitoring
+```bash
+#!/bin/bash
+# health-monitor.sh
+TOKEN="your-admin-token"
+BASE_URL="http://localhost:8080"
+
+# Check service health
+if ! curl -s -f "$BASE_URL/healthz" >/dev/null; then
+    echo "❌ Service health check failed"
+    exit 1
+fi
+
+# Check printer health
+PRINTERS=$(curl -s "$BASE_URL/health/printers" | jq -r '.printers | to_entries[] | select(.value.status == "offline") | .key')
+if [[ -n "$PRINTERS" ]]; then
+    echo "⚠️ Offline printers: $PRINTERS"
+fi
+
+echo "✅ All checks passed"
+```
+
+### Log Monitoring
+```bash
+# Monitor for errors
+sudo journalctl -u printer-proxy -f | grep -i error
+
+# Monitor for failed connections
+sudo journalctl -u printer-proxy -f | grep -i "failed\|error\|offline"
+```
+
+## 🎯 Production Recommendations
+
+### Security
+1. **Change default admin token** immediately
+2. **Configure firewall** rules appropriately
+3. **Use strong SSL certificates** (Let's Encrypt for production)
+4. **Monitor logs** for suspicious activity
+5. **Keep system updated** regularly
+
+### Performance
+1. **Monitor memory usage** during high load
+2. **Configure log rotation** to prevent disk full
+3. **Set up monitoring** for service health
+4. **Use connection pooling** (already enabled)
+5. **Optimize nginx** configuration for your use case
+
+### Reliability
+1. **Set up automated backups** of configuration
+2. **Configure log monitoring** and alerts
+3. **Test failover procedures** regularly
+4. **Document your configuration** and procedures
+5. **Plan for disaster recovery**
+
+---
+
+## 🆘 Support
+
+For issues and questions:
+- **GitHub Issues**: [Create an issue](https://github.com/rachmataditiya/printer-proxy/issues)
+- **Documentation**: Check `ADMIN.md`, `PRINTERS_API.md`, `PERFORMANCE.md`
+- **Logs**: Always check service logs first: `sudo journalctl -u printer-proxy -f`
+
+Happy printing! 🖨️✨
