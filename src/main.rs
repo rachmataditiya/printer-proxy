@@ -1,3 +1,4 @@
+mod admin;
 mod backend;
 mod config;
 mod errors;
@@ -10,6 +11,7 @@ use axum::{
     routing::{any, get},
     Router, serve,
 };
+use admin::{admin_shutdown, admin_restart, admin_renew_ssl, admin_status};
 use config::{load_config, build_printers_map};
 use handlers::{AppState, handle_print, health_check, printers_health_check, printer_health_check};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
@@ -88,9 +90,17 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let app = Router::new()
+        // Health endpoints
         .route("/healthz", get(health_check))
         .route("/health/printers", get(printers_health_check))
         .route("/health/printer/:printer_id", get(printer_health_check))
+        
+        // Admin endpoints (secured with token)
+        .route("/admin/shutdown", get(admin_shutdown))
+        .route("/admin/restart", get(admin_restart))
+        .route("/admin/ssl/renew", get(admin_renew_ssl))
+        .route("/admin/status", get(admin_status))
+        
         // Endpoint kompatibel ePOS: /:printer_id/cgi-bin/epos/service.cgi
         .route("/:printer_id/cgi-bin/epos/service.cgi", any(handle_print))
         .with_state(state)
@@ -107,6 +117,17 @@ async fn main() -> anyhow::Result<()> {
     info!("🏥 Printers health: http://{}/health/printers", addr);
     info!("🏥 Individual health: http://{}/health/printer/{{printer_id}}", addr);
     info!("🖨️  Print endpoint: http://{}/{{printer_id}}/cgi-bin/epos/service.cgi", addr);
+    
+    // Log admin endpoint info (but not show actual usage for security)
+    if std::env::var("ADMIN_TOKEN").is_ok() {
+        info!("🔒 Admin endpoints available (secured with ADMIN_TOKEN)");
+        info!("🛑 Admin shutdown: GET /admin/shutdown?token=TOKEN");
+        info!("🔄 Admin restart: GET /admin/restart?token=TOKEN");
+        info!("🔐 Admin SSL renew: GET /admin/ssl/renew?token=TOKEN&domain=DOMAIN&port=PORT");
+        info!("📊 Admin status: GET /admin/status?token=TOKEN");
+    } else {
+        warn!("⚠️  Admin endpoints disabled (ADMIN_TOKEN not set)");
+    }
 
     let listener = TcpListener::bind(&addr)
         .await
