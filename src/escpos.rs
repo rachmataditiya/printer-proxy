@@ -333,6 +333,10 @@ pub fn build_escpos_from_epos_doc(doc: &EposDoc) -> Result<Vec<u8>, ProxyError> 
         } else {
             esc_cut(&mut out, false);
         }
+    } else {
+        // Auto-cut after image printing if no explicit cut command is provided
+        esc_feed(&mut out, 3);
+        esc_cut(&mut out, false);
     }
 
     Ok(out)
