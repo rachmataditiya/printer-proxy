@@ -6,7 +6,8 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::{collections::HashMap, process::Command, time::Duration};
+use std::{collections::HashMap, process::Command, sync::Arc, time::Duration};
+use tokio::sync::RwLock;
 use tokio::time::sleep;
 use tracing::{error, info, warn, instrument};
 
@@ -65,7 +66,7 @@ fn validate_admin_token(provided_token: Option<&str>) -> bool {
 /// Admin shutdown endpoint
 #[instrument(skip(_state))]
 pub async fn admin_shutdown(
-    State(_state): State<AppState>,
+    State(_state): State<Arc<RwLock<AppState>>>,
     Query(query): Query<AdminQuery>,
 ) -> Result<impl IntoResponse, StatusCode> {
     info!("🔒 Admin shutdown request received");
@@ -96,7 +97,7 @@ pub async fn admin_shutdown(
 /// Admin restart endpoint  
 #[instrument(skip(_state))]
 pub async fn admin_restart(
-    State(_state): State<AppState>,
+    State(_state): State<Arc<RwLock<AppState>>>,
     Query(query): Query<AdminQuery>,
 ) -> Result<impl IntoResponse, StatusCode> {
     info!("🔒 Admin restart request received");
@@ -146,7 +147,7 @@ pub async fn admin_restart(
 /// Admin SSL renewal endpoint
 #[instrument(skip(_state))]
 pub async fn admin_renew_ssl(
-    State(_state): State<AppState>,
+    State(_state): State<Arc<RwLock<AppState>>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<impl IntoResponse, StatusCode> {
     info!("🔒 Admin SSL renewal request received");
@@ -218,7 +219,7 @@ pub async fn admin_renew_ssl(
 /// Admin status endpoint
 #[instrument(skip(state))]
 pub async fn admin_status(
-    State(state): State<AppState>,
+    State(state): State<Arc<RwLock<AppState>>>,
     Query(query): Query<AdminQuery>,
 ) -> Result<impl IntoResponse, StatusCode> {
     info!("🔒 Admin status request received");
@@ -243,7 +244,7 @@ pub async fn admin_status(
             "name": "printer-proxy",
             "version": env!("CARGO_PKG_VERSION"),
             "uptime_seconds": uptime,
-            "printers_configured": state.printers.len()
+            "printers_configured": state.read().await.printers.len()
         },
         "system": {
             "pid": std::process::id(),

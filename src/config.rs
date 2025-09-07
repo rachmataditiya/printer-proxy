@@ -2,12 +2,12 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::PathBuf};
 use tracing::{info, debug, instrument};
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Config {
     pub printers: Vec<Printer>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Printer {
     #[allow(dead_code)]
     pub name: String,

@@ -6,6 +6,7 @@ mod escpos;
 mod handlers;
 mod health;
 mod pool;
+mod printers;
 
 use axum::{
     routing::{any, get},
@@ -14,7 +15,9 @@ use axum::{
 use admin::{admin_shutdown, admin_restart, admin_renew_ssl, admin_status};
 use config::{load_config, build_printers_map};
 use handlers::{AppState, handle_print, health_check, printers_health_check, printer_health_check};
+use printers::{list_printers, get_printer, create_printer, update_printer, delete_printer, reload_printers};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
+use tokio::sync::RwLock;
 use tokio::{net::TcpListener, signal};
 use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
 use tracing::{error, info, warn};
@@ -85,9 +88,9 @@ async fn main() -> anyhow::Result<()> {
         info!("🖨️  Printer '{}' -> {:?}", id, printer.backend);
     }
 
-    let state = AppState {
+    let state = Arc::new(RwLock::new(AppState {
         printers: Arc::new(printers_map),
-    };
+    }));
 
     let app = Router::new()
         // Health endpoints
@@ -100,6 +103,14 @@ async fn main() -> anyhow::Result<()> {
         .route("/admin/restart", get(admin_restart))
         .route("/admin/ssl/renew", get(admin_renew_ssl))
         .route("/admin/status", get(admin_status))
+        
+        // Printer CRUD endpoints (secured with token)
+        .route("/api/printers", get(list_printers))
+        .route("/api/printers", axum::routing::post(create_printer))
+        .route("/api/printers/:printer_id", get(get_printer))
+        .route("/api/printers/:printer_id", axum::routing::put(update_printer))
+        .route("/api/printers/:printer_id", axum::routing::delete(delete_printer))
+        .route("/api/printers/reload", get(reload_printers))
         
         // Endpoint kompatibel ePOS: /:printer_id/cgi-bin/epos/service.cgi
         .route("/:printer_id/cgi-bin/epos/service.cgi", any(handle_print))
@@ -125,8 +136,16 @@ async fn main() -> anyhow::Result<()> {
         info!("🔄 Admin restart: GET /admin/restart?token=TOKEN");
         info!("🔐 Admin SSL renew: GET /admin/ssl/renew?token=TOKEN&domain=DOMAIN&port=PORT");
         info!("📊 Admin status: GET /admin/status?token=TOKEN");
+        
+        info!("🖨️  Printer CRUD endpoints available:");
+        info!("📋 List printers: GET /api/printers?token=TOKEN");
+        info!("➕ Create printer: POST /api/printers?token=TOKEN");
+        info!("🔍 Get printer: GET /api/printers/{{id}}?token=TOKEN");
+        info!("✏️  Update printer: PUT /api/printers/{{id}}?token=TOKEN");
+        info!("🗑️  Delete printer: DELETE /api/printers/{{id}}?token=TOKEN");
+        info!("🔄 Reload config: GET /api/printers/reload?token=TOKEN");
     } else {
-        warn!("⚠️  Admin endpoints disabled (ADMIN_TOKEN not set)");
+        warn!("⚠️  Admin and printer management endpoints disabled (ADMIN_TOKEN not set)");
     }
 
     let listener = TcpListener::bind(&addr)

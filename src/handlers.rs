@@ -17,6 +17,7 @@ use axum::{
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use http::header::CONTENT_TYPE;
 use std::{collections::HashMap, sync::Arc};
+use tokio::sync::RwLock;
 use tracing::{info, warn, error, debug, instrument};
 use serde_json::json;
 
@@ -27,7 +28,7 @@ pub struct AppState {
 
 #[instrument(skip(state, body), fields(printer_id = %printer_id, method = %method, content_length = body.len()))]
 pub async fn handle_print(
-    State(state): State<AppState>,
+    State(state): State<Arc<RwLock<AppState>>>,
     Path(printer_id): Path<String>,
     method: Method,
     headers: HeaderMap,
@@ -46,7 +47,8 @@ pub async fn handle_print(
         return Err(ProxyError::BadPayload("Gunakan POST/PUT untuk kirim data cetak".into()));
     }
 
-    let printer = state
+    let app_state = state.read().await;
+    let printer = app_state
         .printers
         .get(&printer_id)
         .ok_or_else(|| {
@@ -174,14 +176,15 @@ pub async fn health_check() -> &'static str {
 
 /// Check health status of all printers
 #[instrument(skip(state))]
-pub async fn printers_health_check(State(state): State<AppState>) -> impl IntoResponse {
+pub async fn printers_health_check(State(state): State<Arc<RwLock<AppState>>>) -> impl IntoResponse {
     info!("🏥 Checking health status of all printers");
     
     let mut results = HashMap::new();
     let mut futures = Vec::new();
     
     // Create futures for all printer health checks (reduce cloning)
-    for (id, printer) in state.printers.iter() {
+    let app_state = state.read().await;
+    for (id, printer) in app_state.printers.iter() {
         let printer_ref = printer.clone(); // Only clone once
         let id_ref = id.clone();
         
@@ -224,7 +227,7 @@ pub async fn printers_health_check(State(state): State<AppState>) -> impl IntoRe
         "status": overall_status,
         "timestamp": chrono::Utc::now().to_rfc3339(),
         "summary": {
-            "total": state.printers.len(),
+            "total": app_state.printers.len(),
             "online": online_count,
             "offline": offline_count
         },
@@ -237,12 +240,13 @@ pub async fn printers_health_check(State(state): State<AppState>) -> impl IntoRe
 /// Check health status of a specific printer
 #[instrument(skip(state))]
 pub async fn printer_health_check(
-    State(state): State<AppState>,
+    State(state): State<Arc<RwLock<AppState>>>,
     Path(printer_id): Path<String>,
 ) -> Result<impl IntoResponse, ProxyError> {
     info!("🏥 Checking health status of printer '{}'", printer_id);
     
-    let printer = state
+    let app_state = state.read().await;
+    let printer = app_state
         .printers
         .get(&printer_id)
         .ok_or_else(|| ProxyError::NotFound(printer_id.clone()))?;
