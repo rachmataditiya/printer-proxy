@@ -89,5 +89,16 @@ pub async fn quick_health_check(printer: &Printer) -> PrinterStatus {
                 _ => PrinterStatus::Offline,
             }
         }
+        Backend::Usb { device, baud_rate } => {
+            let baud_rate = baud_rate.unwrap_or(9600);
+            
+            match timeout(
+                Duration::from_millis(500), 
+                async { tokio_serial::new(device, baud_rate).open() }
+            ).await {
+                Ok(Ok(_)) => PrinterStatus::Online,
+                _ => PrinterStatus::Offline,
+            }
+        }
     }
 }

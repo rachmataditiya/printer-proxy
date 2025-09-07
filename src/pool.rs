@@ -15,21 +15,51 @@ use tokio::{
     sync::{Mutex, Semaphore},
     time::timeout,
 };
+use tokio_serial::SerialPort;
 use tracing::{debug, error, info, instrument};
+
+/// Connection types for different backends
+#[derive(Debug)]
+pub enum Connection {
+    Tcp(TcpStream),
+    Usb(Box<dyn SerialPort>),
+}
+
+impl Connection {
+    async fn write_all(&mut self, buf: &[u8]) -> Result<(), std::io::Error> {
+        match self {
+            Connection::Tcp(stream) => stream.write_all(buf).await,
+            Connection::Usb(port) => {
+                use std::io::Write;
+                port.write_all(buf)
+            }
+        }
+    }
+
+    async fn flush(&mut self) -> Result<(), std::io::Error> {
+        match self {
+            Connection::Tcp(stream) => stream.flush().await,
+            Connection::Usb(port) => {
+                use std::io::Write;
+                port.flush()
+            }
+        }
+    }
+}
 
 /// Connection pool entry
 #[derive(Debug)]
 struct PooledConnection {
-    stream: TcpStream,
+    connection: Connection,
     created_at: Instant,
     last_used: Instant,
 }
 
 impl PooledConnection {
-    fn new(stream: TcpStream) -> Self {
+    fn new(connection: Connection) -> Self {
         let now = Instant::now();
         Self {
-            stream,
+            connection,
             created_at: now,
             last_used: now,
         }
@@ -70,36 +100,52 @@ impl PrinterPool {
         }
     }
 
-    async fn get_connection(&self, addr: &str) -> Result<TcpStream, ProxyError> {
+    async fn get_connection(&self, backend: &Backend) -> Result<Connection, ProxyError> {
         // Try to get an existing connection first
         {
             let mut connections = self.connections.lock().await;
             while let Some(mut conn) = connections.pop() {
                 if !conn.is_expired(self.max_age) && !conn.is_idle_too_long(self.max_idle) {
                     conn.mark_used();
-                    debug!("🔄 Reusing pooled connection to {}", addr);
-                    return Ok(conn.stream);
+                    debug!("🔄 Reusing pooled connection for {:?}", backend);
+                    return Ok(conn.connection);
                 }
-                debug!("🗑️ Discarding expired/idle connection to {}", addr);
+                debug!("🗑️ Discarding expired/idle connection for {:?}", backend);
             }
         }
 
         // No valid connection available, create new one
-        debug!("🔌 Creating new connection to {}", addr);
-        let stream = TcpStream::connect(addr)
-            .await
-            .map_err(|e| {
-                error!("❌ TCP connect to {} failed: {}", addr, e);
-                ProxyError::Io(format!("TCP connect {} gagal: {}", addr, e))
-            })?;
+        debug!("🔌 Creating new connection for {:?}", backend);
+        let connection = match backend {
+            Backend::Tcp9100 { host, port } => {
+                let addr = format!("{}:{}", host, port);
+                let stream = TcpStream::connect(&addr)
+                    .await
+                    .map_err(|e| {
+                        error!("❌ TCP connect to {} failed: {}", addr, e);
+                        ProxyError::Io(format!("TCP connect {} gagal: {}", addr, e))
+                    })?;
+                Connection::Tcp(stream)
+            }
+            Backend::Usb { device, baud_rate } => {
+                let baud_rate = baud_rate.unwrap_or(9600); // Default baud rate for ESC/POS
+                let port = tokio_serial::new(device, baud_rate)
+                    .open()
+                    .map_err(|e| {
+                        error!("❌ USB serial connect to {} failed: {}", device, e);
+                        ProxyError::Io(format!("USB serial connect {} gagal: {}", device, e))
+                    })?;
+                Connection::Usb(port)
+            }
+        };
 
-        Ok(stream)
+        Ok(connection)
     }
 
-    async fn return_connection(&self, stream: TcpStream) {
+    async fn return_connection(&self, connection: Connection) {
         let mut connections = self.connections.lock().await;
         if connections.len() < self.max_connections {
-            connections.push(PooledConnection::new(stream));
+            connections.push(PooledConnection::new(connection));
             debug!("📥 Returned connection to pool (total: {})", connections.len());
         } else {
             debug!("🗑️ Pool full, dropping connection");
@@ -132,40 +178,53 @@ impl ConnectionManager {
         }
     }
 
-    fn get_pool(&self, addr: &str) -> Arc<PrinterPool> {
+    fn get_pool(&self, backend: &Backend) -> Arc<PrinterPool> {
+        let pool_key = match backend {
+            Backend::Tcp9100 { host, port } => format!("tcp:{}:{}", host, port),
+            Backend::Usb { device, baud_rate } => {
+                let baud = baud_rate.unwrap_or(9600);
+                format!("usb:{}:{}", device, baud)
+            }
+        };
+        
         self.pools
-            .entry(addr.to_string())
+            .entry(pool_key)
             .or_insert_with(|| Arc::new(PrinterPool::new(5))) // Max 5 connections per printer
             .clone()
     }
 
     pub async fn send_to_printer(&self, printer: &Printer, payload: &[u8]) -> Result<(), ProxyError> {
-        let Backend::Tcp9100 { host, port } = &printer.backend;
-        let addr = format!("{}:{}", host, port);
-        
-        let pool = self.get_pool(&addr);
-        let mut stream = pool.get_connection(&addr).await?;
+        let pool = self.get_pool(&printer.backend);
+        let mut connection = pool.get_connection(&printer.backend).await?;
 
-        info!("📦 Sending {} bytes to {}", payload.len(), addr);
+        let target_desc = match &printer.backend {
+            Backend::Tcp9100 { host, port } => format!("{}:{}", host, port),
+            Backend::Usb { device, baud_rate } => {
+                let baud = baud_rate.unwrap_or(9600);
+                format!("{}@{}", device, baud)
+            }
+        };
+
+        info!("📦 Sending {} bytes to {}", payload.len(), target_desc);
         debug!("📦 Payload preview: {:02X?}", &payload[..payload.len().min(32)]);
 
         let result = async {
-            stream.write_all(payload).await?;
-            stream.flush().await?;
+            connection.write_all(payload).await?;
+            connection.flush().await?;
             Ok::<(), std::io::Error>(())
         }.await;
 
         match result {
             Ok(()) => {
-                info!("✅ Successfully sent {} bytes to {}", payload.len(), addr);
+                info!("✅ Successfully sent {} bytes to {}", payload.len(), target_desc);
                 // Return connection to pool for reuse
-                pool.return_connection(stream).await;
+                pool.return_connection(connection).await;
                 Ok(())
             }
             Err(e) => {
-                error!("❌ TCP write/flush to {} failed: {}", addr, e);
+                error!("❌ Write/flush to {} failed: {}", target_desc, e);
                 // Don't return failed connection to pool
-                Err(ProxyError::Io(format!("TCP write {} gagal: {}", addr, e)))
+                Err(ProxyError::Io(format!("Write {} gagal: {}", target_desc, e)))
             }
         }
     }
@@ -217,7 +276,11 @@ impl HealthCache {
 
     pub async fn get_or_check(&self, printer: &Printer) -> PrinterStatus {
         let cache_key = format!("{}:{}", printer.id, match &printer.backend {
-            Backend::Tcp9100 { host, port } => format!("{}:{}", host, port),
+            Backend::Tcp9100 { host, port } => format!("tcp:{}:{}", host, port),
+            Backend::Usb { device, baud_rate } => {
+                let baud = baud_rate.unwrap_or(9600);
+                format!("usb:{}:{}", device, baud)
+            }
         });
 
         // Try cache first
@@ -241,29 +304,58 @@ impl HealthCache {
 
     #[instrument(skip(self, printer), fields(printer_id = %printer.id))]
     async fn check_printer_health_direct(&self, printer: &Printer) -> PrinterStatus {
-        let Backend::Tcp9100 { host, port } = &printer.backend;
-        let addr = format!("{}:{}", host, port);
-        
-        debug!("🔍 Direct TCP health check for {}", addr);
-        
-        // Quick connection test with short timeout
-        let check_result = timeout(
-            Duration::from_millis(1500), // Reduced from 2 seconds
-            TcpStream::connect(&addr)
-        ).await;
-        
-        match check_result {
-            Ok(Ok(_stream)) => {
-                debug!("✅ TCP health check passed for {}", addr);
-                PrinterStatus::Online
+        match &printer.backend {
+            Backend::Tcp9100 { host, port } => {
+                let addr = format!("{}:{}", host, port);
+                debug!("🔍 Direct TCP health check for {}", addr);
+                
+                // Quick connection test with short timeout
+                let check_result = timeout(
+                    Duration::from_millis(1500), // Reduced from 2 seconds
+                    TcpStream::connect(&addr)
+                ).await;
+                
+                match check_result {
+                    Ok(Ok(_stream)) => {
+                        debug!("✅ TCP health check passed for {}", addr);
+                        PrinterStatus::Online
+                    }
+                    Ok(Err(e)) => {
+                        debug!("❌ TCP health check failed for {}: {}", addr, e);
+                        PrinterStatus::Offline
+                    }
+                    Err(_timeout) => {
+                        debug!("⏰ TCP health check timeout for {}", addr);
+                        PrinterStatus::Offline
+                    }
+                }
             }
-            Ok(Err(e)) => {
-                debug!("❌ TCP health check failed for {}: {}", addr, e);
-                PrinterStatus::Offline
-            }
-            Err(_timeout) => {
-                debug!("⏰ TCP health check timeout for {}", addr);
-                PrinterStatus::Offline
+            Backend::Usb { device, baud_rate } => {
+                let baud_rate = baud_rate.unwrap_or(9600);
+                debug!("🔍 Direct USB health check for {}@{}", device, baud_rate);
+                
+                // Quick connection test with short timeout
+                let check_result = timeout(
+                    Duration::from_millis(1500),
+                    async {
+                        tokio_serial::new(device, baud_rate).open()
+                    }
+                ).await;
+                
+                match check_result {
+                    Ok(Ok(_port)) => {
+                        debug!("✅ USB health check passed for {}@{}", device, baud_rate);
+                        PrinterStatus::Online
+                    }
+                    Ok(Err(e)) => {
+                        debug!("❌ USB health check failed for {}@{}: {}", device, baud_rate, e);
+                        PrinterStatus::Offline
+                    }
+                    Err(_timeout) => {
+                        debug!("⏰ USB health check timeout for {}@{}", device, baud_rate);
+                        PrinterStatus::Offline
+                    }
+                }
             }
         }
     }
@@ -271,7 +363,11 @@ impl HealthCache {
     #[allow(dead_code)]
     pub fn invalidate(&self, printer: &Printer) {
         let cache_key = format!("{}:{}", printer.id, match &printer.backend {
-            Backend::Tcp9100 { host, port } => format!("{}:{}", host, port),
+            Backend::Tcp9100 { host, port } => format!("tcp:{}:{}", host, port),
+            Backend::Usb { device, baud_rate } => {
+                let baud = baud_rate.unwrap_or(9600);
+                format!("usb:{}:{}", device, baud)
+            }
         });
         self.cache.remove(&cache_key);
         debug!("🗑️ Invalidated health cache for {}", cache_key);

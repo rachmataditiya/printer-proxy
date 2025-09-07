@@ -20,6 +20,8 @@ pub struct Printer {
 pub enum Backend {
     #[serde(rename = "tcp9100")]
     Tcp9100 { host: String, port: u16 },
+    #[serde(rename = "usb")]
+    Usb { device: String, baud_rate: Option<u32> },
 }
 
 #[instrument]
