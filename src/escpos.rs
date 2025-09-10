@@ -326,7 +326,7 @@ pub fn build_escpos_from_epos_doc(doc: &EposDoc) -> Result<Vec<u8>, ProxyError> 
 
     if let Some(t) = &doc.cut {
         if t.eq_ignore_ascii_case("feed") {
-            esc_feed(&mut out, 3);
+            esc_feed(&mut out, 8);
             esc_cut(&mut out, false);
         } else if t.eq_ignore_ascii_case("partial") {
             esc_cut(&mut out, true);
@@ -335,7 +335,8 @@ pub fn build_escpos_from_epos_doc(doc: &EposDoc) -> Result<Vec<u8>, ProxyError> 
         }
     } else {
         // Auto-cut after image printing if no explicit cut command is provided
-        esc_feed(&mut out, 3);
+        // Add more feed lines to ensure all images are fully printed before cutting
+        esc_feed(&mut out, 8);
         esc_cut(&mut out, false);
     }
 
